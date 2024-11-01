@@ -1,0 +1,60 @@
+#!/bin/sh
+# =============================================================================
+# @(#)O get_order_status          revision 1.1-2                    08/24/2016
+# @(#)P CGI Interface script for customer order status website
+# @(#)Q bobh                      revision 1.0-1                    08/19/2016
+# @(#)R /usr/lib/apache/cgi-bin
+# =============================================================================
+
+PID=$$
+TMP=/tmp/order_status.$PID
+>$TMP
+echo "Content-type: text/html\n\n" >>$TMP
+
+# disable filename globbing
+set -f
+
+#
+# Functions
+#
+
+# ---------------------------------------------------------------------------
+# @(#)J outputreport              revision 1.0-1                  08/19/2016
+# @(#)K Output report to website
+# @(#)L bobh                      revision 1.0-1                  08/19/2016
+# ---------------------------------------------------------------------------
+
+outputreport() {
+
+  cat $TMP
+}
+
+
+
+# ---------------------------------------------------------------------------
+# @(#)J noreport                  revision 1.0-1                  08/19/2016
+# @(#)K Handle situation in which no report is generated
+# @(#)L bobh                      revision 1.0-1                  08/19/2016
+# ---------------------------------------------------------------------------
+
+noreport() {
+  echo "We are unable to process your request at this time"
+  echo "Please check your Ethan Allen customer number and store"
+  echo "Or try again later"
+}
+
+
+
+# set site code from incoming query
+SERVER=`/usr/local/exec/servername`
+CUSTNO=`echo $QUERY_STRING | cut -c 3-`
+
+# run report
+/usr/local/app/fpwebrpt $SERVER $TMP OPENORD $CUSTNO
+
+if [ -s $TMP ]; then
+  outputreport
+else
+  noreport
+fi
+

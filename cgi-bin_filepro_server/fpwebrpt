@@ -1,0 +1,300 @@
+#!/bin/sh
+# ============================================================================
+# @(#)O fpwebrpt                   revision 2.9-76                  07/20/2017
+# @(#)P Run fp web report for customer from site server 
+# @(#)Q bobh                    revision 1.0-1                   07/29/2016
+# @(#)R /usr/local/app
+# ============================================================================
+# Created as part of Chg472
+#
+#   $1 - ServerName       (Required)
+#   $2 - ReportName       (Required)
+#   $3 - ReportType       (Required)
+#   $4 - CustNum          (Required)
+#
+# Returns path to html report or json report to std out (return Null if Error)
+# 
+
+
+PROGRAM="`basename $0`"
+PID=$$
+
+[ -z "$TERM" ] && {
+  ##### no TERM definition probably means missing other env definitions
+  ##### when run from CGI script
+  . /usr/local/exec/setenv
+  }
+
+SETVAR="SEPA ARCUSTFPWEBRPTDIR ARCUSTFPWEBRPTREFDIR ARCUSTFPWEBRPTTMPDIR"
+SETVAR="$SETVAR ARCUSTFPWEBRPTLOGDIR ARCUSTFPWEBRPTLLOGDIR"
+SETVAR="$SETVAR ARCUSTFPWEBRPTCTLFILE ARCUSTFPWEBRPTDEBUGDIR"
+SETVAR="$SETVAR ARCUSTFPWEBRPTLLOGFILE"
+. setvar
+
+FURNPRODEBUG=`readctldefault $ARCUSTFPWEBRPTCTLFILE FURNPRODEBUG DISABLEENABLE`
+DISPNAME=`readctldefault $ARCUSTFPWEBRPTCTLFILE DISPNAME DISABLEENABLE`
+SEQNUM=`addctl $ARCUSTFPWEBRPTCTLFILE SEQNUM 1 9999 r0`
+
+RUNOK=false
+SERVERNAME="$1"
+REPORTNAME=""
+REPORTFUNCTION=""
+CUSTNUM=""
+INVALIDSERVER=false
+THISSERVER="`servername`"
+LINECOUNT="0"
+CUSTFND=true
+RPTTYPE=""
+
+REPORTSORTTIME="`sortdatetime`"
+REPORTDAYTIME="`logday`"
+REPORTTIME="`logdate`"
+RUNCOUNT="---"
+
+##### validate current server 
+if [ "$THISSERVER" = "$SERVERNAME" ]
+  then
+    if [ "$4" != "" ]
+      then
+        REPORTNAME="$2"
+        REPORTFUNCTION="$3"
+        CUSTNUM="$4"
+        RUNOK=true
+      else
+        RUNOK=false
+    fi
+  else
+    RUNOK=false
+    INVALIDSERVER=true     
+fi
+
+##### ensure that debug & log directories exist
+LOGDIRLIST="$ARCUSTFPWEBRPTDIR $ARCUSTFPWEBRPTREFDIR $ARCUSTFPWEBRPTTMPDIR"
+LOGDIRLIST="$LOGDIRLIST $ARCUSTFPWEBRPTLOGDIR $ARCUSTFPWEBRPTLLOGDIR"
+LOGDIRLIST="$LOGDIRLIST $ARCUSTFPWEBRPTDEBUGDIR"
+
+for TDIR in $LOGDIRLIST
+  do
+    [ -d $TDIR ] || {
+      mkdir $TDIR 2>/dev/null
+      chmod 777 $TDIR 2>/dev/null
+      }
+  done
+
+##### define logfile
+TMPFILE=$ARCUSTFPWEBRPTLOGDIR/${REPORTSORTTIME}.${SEQNUM}.log
+
+##### define reportfile in /appl/fpwebrpt/tmp
+TMPFILE1=$ARCUSTFPWEBRPTTMPDIR/${REPORTSORTTIME}.${SEQNUM}.log
+
+##### define debugfile
+TMPDEBUG=$ARCUSTFPWEBRPTDEBUGDIR/${REPORTSORTTIME}.${SEQNUM}.log
+
+##### create debug logfile if furnprodebug is enabled
+[ "$FURNPRODEBUG" = "ENABLE" ] && {
+  >$TMPDEBUG
+  chmod 666 $TMPDEBUG >/dev/null
+  chown filepro $TMPDEBUG >/dev/null
+  }
+
+if [ "$ARCUSTFPWEBRPTLLOGFILE" = "" ]
+  then
+    ARCUSTFPWEBRPTLLOGFILE="$ARCUSTFPWEBRPTLLOGDIR/llog.fpwebrpt"
+fi
+    
+##### ensure llogfile was created
+if [  ! -f "$ARCUSTFPWEBRPTLLOGFILE" ]
+  then
+    >$ARCUSTFPWEBRPTLLOGFILE
+    chmod 0666 $ARCUSTFPWEBRPTLLOGFILE
+    chown root $ARCUSTFPWEBRPTLLOGFILE
+    chgrp other $ARCUSTFPWEBRPTLLOGFILE
+fi
+
+
+# -----------------------------------------------------------------------------
+##### functions
+
+# -----------------------------------------------------------------------------
+# @(#)J buildhtmlbody              revision 1.6-7                   09/20/2016
+# @(#)K construct html portion of destination file using source text file
+# @(#)L bobh                    revision 1.0-1                   08/09/2016
+# -----------------------------------------------------------------------------
+# $1 - CSFILE       source Text File to be converted
+# $2 - TFILE        Target file to receive html result
+
+buildhtmlbody() {
+
+  CSFILE="$1"
+  TFILE="$2"
+  TMPFILE2=/tmp/webrpt.${PROGRAM}.${SEQNUM}.2.txt
+
+  >$TMPFILE2
+  chmod 0666 $TMPFILE2 >/dev/null
+
+  ##### ensure that source file NewLine terminated
+  dtox $CSFILE >$TMPFILE2
+
+  ##### HTML Header Section
+  >$TFILE
+  chmod 0666 $TFILE 2>/dev/null
+  echo "Content-type:text/html\n\n" >>$TFILE
+  echo "<html>" >>$TFILE
+  echo "<body>" >>$TFILE
+  echo "<style>" >>$TFILE
+  echo "  table, th, td { border: 2px solid blue; }" >>$TFILE
+  echo "</style>" >>$TFILE
+
+  ##### validate whether customer number not found
+  [ "$CUSTFND" = "false" ] && {
+    echo "<p style=\"font-family: Courier; font-size:120%; color: red;\">" >>$TFILE
+    } 
+
+  sed -f ${REFDIR}/text2html.fpwebrpt $TMPFILE2 >>$TFILE
+
+  rm -f $TMPFILE2 2>/dev/null
+
+  ##### HTML Footer Section
+  echo "<body/>" >>$TFILE
+  echo "<html/>" >>$TFILE
+
+  } # buildhtmlbody
+
+# -----------------------------------------------------------------------------
+# @(#)J buildjsonbody              revision 1.0-1                   07/20/2017
+# @(#)K construct json portion of destination file using source text file
+# @(#)L bobh                    revision 1.0-1                   08/09/2016
+# -----------------------------------------------------------------------------
+# $1 - CSFILE       source Text File to be converted
+# $2 - TFILE        Target file to receive json result
+
+buildjsonbody() {
+
+  CSFILE="$1"
+  TFILE="$2"
+  TMPFILE2=/tmp/webrpt.${PROGRAM}.${SEQNUM}.2.txt
+
+  >$TMPFILE2
+  chmod 0666 $TMPFILE2 >/dev/null
+
+  ##### ensure that source file NewLine terminated
+  dtox $CSFILE >$TMPFILE2
+
+  ##### JSON Header Section
+  >$TFILE
+  chmod 0666 $TFILE 2>/dev/null
+  echo "Content-type: application/json\n\n" >>$TFILE
+
+  ##### concatanate the report content to destination file 
+  cat $TMPFILE2 >>$TFILE  
+
+  rm -f $TMPFILE2 2>/dev/null
+
+  } # buildjsonbody
+
+
+
+# --------------------------------------------------------------------------------
+
+##### main
+
+if $RUNOK
+  then
+    >$TMPFILE
+    chmod 666 $TMPFILE
+    echo "$REPORTSORTTIME: Start" >>$TMPFILE
+    echo "                  SERVER NAME: ${SERVERNAME}" >>$TMPFILE
+    echo "                  REPORT NAME: ${REPORTNAME}" >>$TMPFILE
+    echo "                  REPORT TYPE: ${REPORTFUNCTION}" >>$TMPFILE
+    echo "                  CUSTOMER ID: ${CUSTNUM}" >>$TMPFILE
+    echo >>$TMPFILE
+
+    export REPORTFUNCTION CUSTNUM TMPFILE1 TMPFILE FURNPRODEBUG TMPDEBUG
+    export SEQNUM DISPNAME
+    case $REPORTFUNCTION in
+      OPENORD|openord)
+        # Open Order Report by Customer Number - html format
+        >$TMPFILE1
+        chmod 0666 $TMPFILE1
+        chown filepro $TMPFILE1
+        RPTTYPE="HTML";export RPTTYPE
+        rreport arcust -f fpwebrpt -v fpwebrpt_sel -y noauto -a -u >/dev/null
+        ;;
+      ORDJSON|ordjson)
+        # Open Order Report by Customer Number - non html format
+        >$TMPFILE1
+        chmod 0666 $TMPFILE1
+        chown filepro $TMPFILE1
+        RPTTYPE="JSON";export RPTTYPE
+        rreport arcust -f fpwebrpt -v fpwebrpt_sel -y noauto -a -u >/dev/null
+        ;;
+      ITMDLVD|itmdlvd)
+        # All Items Delivered Summary report by Customer Number
+        >$TMPFILE1
+        chmod 0666 $TMPFILE1
+        chown filepro $TMPFILE1
+        RPTTYPE="";export RPTTYPE
+        rreport trandlv -f crmdelvsumm -a -v crmdelvdets -u -id -y noauto \
+        -p $TMPFILE1 -pc dummy -r $CUSTNUM >/dev/null
+        ;;
+    esac
+    ##### examine the report file
+    # echo "`cat $TMPFILE1`" >>$TMPFILE
+    # echo "`l $TMPFILE1`" >>$TMPFILE
+    # echo >>$TMPFILE
+    # echo "`cat $TMPFILE1`" >>$TMPFILE
+
+    ##### count number of report lines
+    LINECOUNT="`cat $TMPFILE1 | wc -l`"
+    LINECOUNT=`expr $LINECOUNT + 0`
+
+    ##### Test whether report file exists and has zero size
+    [ -f $TMPFILE1 -a ! -s $TMPFILE1 ] && {
+      MSG="No Report Found for Customer Number: [${CUSTNUM}]"
+      echo "<strong>$MSG</strong>" >>$TMPFILE1
+      echo "" >>$TMPFILE1
+      CUSTFND=false
+      }
+  
+    # echo "Convert $TMPFILE1 to html/json Format" >>$TMPFILE
+    if [ "$RPTTYPE" != "HTML" ]
+      then
+        # copy json data file to reportname
+        buildjsonbody $TMPFILE1 $REPORTNAME
+      else
+        # copy html data file to reportname
+        buildhtmlbody $TMPFILE1 $REPORTNAME
+    fi
+    # cp $TMPFILE1 $REPORTNAME >/dev/null
+
+    # echo "`l $REPORTNAME`"  >>$TMPFILE
+    # echo "`head $REPORTNAME`"  >>$TMPFILE
+
+    rm -f $TMPFILE1 2>/dev/null
+    MSG1="RUNOK: [$RUNOK]  LINE COUNT [${LINECOUNT}] CUSTNUM: [${CUSTNUM}]"
+    echo "`logdates` ${PROGRAM} $MSG1" >>$ARCUSTFPWEBRPTLLOGFILE
+    echo "\n`logdates` $MSG1" >>$TMPFILE
+  else
+    if [ "$INVALIDSERVER" = "true" ]
+      then
+        MSG1=", This Server is not [${SERVERNAME}]"
+        MSG2="Check the server Name"
+        echo "`logdates` ${PROGRAM} RUNOK: [$RUNOK] $MSG1" >>$ARCUSTFPWEBRPTLLOGFILE
+        echo "$MSG1" >>$TMPFILE
+        echo "$MSG2" >>$TMPFILE
+      else
+        echo >>$TMPFILE
+        echo "$PROGRAM:  One or more Required Parameter is missing:" >>$TMPFILE
+        echo "           Parameter 1: servername (lowercase)" >>$TMPFILE
+        echo "           Parameter 2: ReportName" >>$TMPFILE
+        echo "           Parameter 3: ReportFunction [OPENORD|ITMDLVD]" >>$TMPFILE
+        echo "           Parameter 4: CustomerNumber" >>$TMPFILE
+        MSG1=", 2 or more required Parameter Missing"
+        echo "`logdates` ${PROGRAM} RUNOK: [$RUNOK] $MSG1" >>$ARCUSTFPWEBRPTLLOGFILE
+        echo >>$TMPFILE
+    fi 
+fi
+
+echo "`sortdatetime`: Finish" >>$TMPFILE
+# -----------------------------------------------------------------------------
+##### finish
